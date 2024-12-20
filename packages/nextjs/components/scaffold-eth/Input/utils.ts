@@ -1,10 +1,10 @@
-export type CommonInputProps<T = string> = {
+export interface CommonInputProps<T = string> {
   value: T;
   onChange: (newValue: T) => void;
   name?: string;
   placeholder?: string;
   disabled?: boolean;
-};
+}
 
 export enum IntegerVariant {
   UINT8 = "uint8",
@@ -76,16 +76,18 @@ export enum IntegerVariant {
 export const SIGNED_NUMBER_REGEX = /^-?\d+\.?\d*$/;
 export const UNSIGNED_NUMBER_REGEX = /^\.?\d+\.?\d*$/;
 
-export const isValidInteger = (dataType: IntegerVariant, value: string) => {
+export const isValidInteger = (dataType: IntegerVariant, value: bigint | string, strict = true) => {
   const isSigned = dataType.startsWith("i");
   const bitcount = Number(dataType.substring(isSigned ? 3 : 4));
 
   let valueAsBigInt;
   try {
     valueAsBigInt = BigInt(value);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
   } catch (e) {}
   if (typeof valueAsBigInt !== "bigint") {
+    if (strict) {
+      return false;
+    }
     if (!value || typeof value !== "string") {
       return true;
     }
@@ -103,7 +105,3 @@ export const isValidInteger = (dataType: IntegerVariant, value: string) => {
   }
   return true;
 };
-
-// Treat any dot-separated string as a potential ENS name
-const ensRegex = /.+\..+/;
-export const isENS = (address = "") => ensRegex.test(address);

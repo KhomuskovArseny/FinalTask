@@ -1,58 +1,13 @@
 import { useEffect, useState } from "react";
-import { useTargetNetwork } from "./useTargetNetwork";
-import { useInfiniteQuery } from "@tanstack/react-query";
 import { Abi, AbiEvent, ExtractAbiEventNames } from "abitype";
-import { BlockNumber, GetLogsParameters } from "viem";
-import { Config, UsePublicClientReturnType, useBlockNumber, usePublicClient } from "wagmi";
+import { Hash } from "viem";
+import { usePublicClient } from "wagmi";
 import { useDeployedContractInfo } from "~~/hooks/scaffold-eth";
 import { replacer } from "~~/utils/scaffold-eth/common";
-import {
-  ContractAbi,
-  ContractName,
-  UseScaffoldEventHistoryConfig,
-  UseScaffoldEventHistoryData,
-} from "~~/utils/scaffold-eth/contract";
-
-const getEvents = async (
-  getLogsParams: GetLogsParameters<AbiEvent | undefined, AbiEvent[] | undefined, boolean, BlockNumber, BlockNumber>,
-  publicClient?: UsePublicClientReturnType<Config, number>,
-  Options?: {
-    blockData?: boolean;
-    transactionData?: boolean;
-    receiptData?: boolean;
-  },
-) => {
-  const logs = await publicClient?.getLogs({
-    address: getLogsParams.address,
-    fromBlock: getLogsParams.fromBlock,
-    args: getLogsParams.args,
-    event: getLogsParams.event,
-  });
-  if (!logs) return undefined;
-
-  const finalEvents = await Promise.all(
-    logs.map(async log => {
-      return {
-        ...log,
-        blockData:
-          Options?.blockData && log.blockHash ? await publicClient?.getBlock({ blockHash: log.blockHash }) : null,
-        transactionData:
-          Options?.transactionData && log.transactionHash
-            ? await publicClient?.getTransaction({ hash: log.transactionHash })
-            : null,
-        receiptData:
-          Options?.receiptData && log.transactionHash
-            ? await publicClient?.getTransactionReceipt({ hash: log.transactionHash })
-            : null,
-      };
-    }),
-  );
-
-  return finalEvents;
-};
+import { ContractAbi, ContractName, UseScaffoldEventHistoryConfig } from "~~/utils/scaffold-eth/contract";
 
 /**
- * Reads events from a deployed contract
+ * @dev reads events from a deployed contract
  * @param config - The config settings
  * @param config.contractName - deployed contract name
  * @param config.eventName - name of the event to listen for
@@ -61,15 +16,10 @@ const getEvents = async (
  * @param config.blockData - if set to true it will return the block data for each event (default: false)
  * @param config.transactionData - if set to true it will return the transaction data for each event (default: false)
  * @param config.receiptData - if set to true it will return the receipt data for each event (default: false)
- * @param config.watch - if set to true, the events will be updated every pollingInterval milliseconds set at scaffoldConfig (default: false)
- * @param config.enabled - set this to false to disable the hook from running (default: true)
  */
 export const useScaffoldEventHistory = <
   TContractName extends ContractName,
   TEventName extends ExtractAbiEventNames<ContractAbi<TContractName>>,
-  TBlockData extends boolean = false,
-  TTransactionData extends boolean = false,
-  TReceiptData extends boolean = false,
 >({
   contractName,
   eventName,
@@ -78,88 +28,82 @@ export const useScaffoldEventHistory = <
   blockData,
   transactionData,
   receiptData,
-  watch,
-  enabled = true,
-}: UseScaffoldEventHistoryConfig<TContractName, TEventName, TBlockData, TTransactionData, TReceiptData>) => {
-  const { targetNetwork } = useTargetNetwork();
-  const publicClient = usePublicClient({
-    chainId: targetNetwork.id,
-  });
-  const [isFirstRender, setIsFirstRender] = useState(true);
-
-  const { data: blockNumber } = useBlockNumber({ watch: watch, chainId: targetNetwork.id });
-
-  const { data: deployedContractData } = useDeployedContractInfo(contractName);
-
-  const event =
-    deployedContractData &&
-    ((deployedContractData.abi as Abi).find(part => part.type === "event" && part.name === eventName) as AbiEvent);
-
-  const isContractAddressAndClientReady = Boolean(deployedContractData?.address) && Boolean(publicClient);
-
-  const query = useInfiniteQuery({
-    queryKey: [
-      "eventHistory",
-      {
-        contractName,
-        address: deployedContractData?.address,
-        eventName,
-        fromBlock: fromBlock.toString(),
-        chainId: targetNetwork.id,
-        filters: JSON.stringify(filters, replacer),
-      },
-    ],
-    queryFn: async ({ pageParam }) => {
-      if (!isContractAddressAndClientReady) return undefined;
-      const data = await getEvents(
-        { address: deployedContractData?.address, event, fromBlock: pageParam, args: filters },
-        publicClient,
-        { blockData, transactionData, receiptData },
-      );
-
-      return data;
-    },
-    enabled: enabled && isContractAddressAndClientReady,
-    initialPageParam: fromBlock,
-    getNextPageParam: () => {
-      return blockNumber;
-    },
-    select: data => {
-      const events = data.pages.flat();
-      const eventHistoryData = events?.map(addIndexedArgsToEvent) as UseScaffoldEventHistoryData<
-        TContractName,
-        TEventName,
-        TBlockData,
-        TTransactionData,
-        TReceiptData
-      >;
-      return {
-        pages: eventHistoryData?.reverse(),
-        pageParams: data.pageParams,
-      };
-    },
-  });
+}: UseScaffoldEventHistoryConfig<TContractName, TEventName>) => {
+  const [events, setEvents] = useState<any[]>();
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const { data: deployedContractData, isLoading: deployedContractLoading } = useDeployedContractInfo(contractName);
+  const publicClient = usePublicClient();
 
   useEffect(() => {
-    const shouldSkipEffect = !blockNumber || !watch || isFirstRender;
-    if (shouldSkipEffect) {
-      // skipping on first render, since on first render we should call queryFn with
-      // fromBlock value, not blockNumber
-      if (isFirstRender) setIsFirstRender(false);
-      return;
-    }
+    async function readEvents() {
+      try {
+        if (!deployedContractData) {
+          throw new Error("Contract not found");
+        }
 
-    query.fetchNextPage();
+        const event = (deployedContractData.abi as Abi).find(
+          part => part.type === "event" && part.name === eventName,
+        ) as AbiEvent;
+
+        const logs = await publicClient.getLogs({
+          address: deployedContractData?.address,
+          event,
+          args: filters as any, // TODO: check if it works and fix type
+          fromBlock,
+        });
+        const newEvents = [];
+        for (let i = logs.length - 1; i >= 0; i--) {
+          newEvents.push({
+            log: logs[i],
+            args: logs[i].args,
+            block:
+              blockData && logs[i].blockHash === null
+                ? null
+                : await publicClient.getBlock({ blockHash: logs[i].blockHash as Hash }),
+            transaction:
+              transactionData && logs[i].transactionHash !== null
+                ? await publicClient.getTransaction({ hash: logs[i].transactionHash as Hash })
+                : null,
+            receipt:
+              receiptData && logs[i].transactionHash !== null
+                ? await publicClient.getTransactionReceipt({ hash: logs[i].transactionHash as Hash })
+                : null,
+          });
+        }
+        setEvents(newEvents);
+        setError(undefined);
+      } catch (e: any) {
+        console.error(e);
+        setEvents(undefined);
+        setError(e);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    if (!deployedContractLoading) {
+      readEvents();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockNumber, watch]);
+  }, [
+    publicClient,
+    fromBlock,
+    contractName,
+    eventName,
+    deployedContractLoading,
+    deployedContractData?.address,
+    deployedContractData,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(filters, replacer),
+    blockData,
+    transactionData,
+    receiptData,
+  ]);
 
   return {
-    data: query.data?.pages,
-    status: query.status,
-    error: query.error,
-    isLoading: query.isLoading,
-    isFetchingNewEvent: query.isFetchingNextPage,
-    refetch: query.refetch,
+    data: events?.map(addIndexedArgsToEvent),
+    isLoading: isLoading,
+    error: error,
   };
 };
 

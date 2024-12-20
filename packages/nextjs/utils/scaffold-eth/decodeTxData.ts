@@ -1,16 +1,16 @@
 import { TransactionWithFunction } from "./block";
 import { GenericContractsDeclaration } from "./contract";
-import { Abi, AbiFunction, decodeFunctionData, getAbiItem } from "viem";
-import { hardhat } from "viem/chains";
-import contractData from "~~/contracts/deployedContracts";
+import { Abi, decodeFunctionData, getAbiItem } from "viem";
+import { hardhat } from "wagmi/chains";
+import contractData from "~~/generated/deployedContracts";
 
 type ContractsInterfaces = Record<string, Abi>;
 type TransactionType = TransactionWithFunction | null;
 
 const deployedContracts = contractData as GenericContractsDeclaration | null;
-const chainMetaData = deployedContracts?.[hardhat.id];
+const chainMetaData = deployedContracts?.[hardhat.id]?.[0];
 const interfaces = chainMetaData
-  ? Object.entries(chainMetaData).reduce((finalInterfacesObj, [contractName, contract]) => {
+  ? Object.entries(chainMetaData.contracts).reduce((finalInterfacesObj, [contractName, contract]) => {
       finalInterfacesObj[contractName] = contract.abi;
       return finalInterfacesObj;
     }, {} as ContractsInterfaces)
@@ -18,7 +18,6 @@ const interfaces = chainMetaData
 
 export const decodeTransactionData = (tx: TransactionWithFunction) => {
   if (tx.input.length >= 10 && !tx.input.startsWith("0x60e06040")) {
-    let foundInterface = false;
     for (const [, contractAbi] of Object.entries(interfaces)) {
       try {
         const { functionName, args } = decodeFunctionData({
@@ -27,22 +26,17 @@ export const decodeTransactionData = (tx: TransactionWithFunction) => {
         });
         tx.functionName = functionName;
         tx.functionArgs = args as any[];
-        tx.functionArgNames = getAbiItem<AbiFunction[], string>({
-          abi: contractAbi as AbiFunction[],
-          name: functionName,
-        })?.inputs?.map((input: any) => input.name);
-        tx.functionArgTypes = getAbiItem<AbiFunction[], string>({
-          abi: contractAbi as AbiFunction[],
-          name: functionName,
-        })?.inputs.map((input: any) => input.type);
-        foundInterface = true;
+        tx.functionArgNames = getAbiItem({ abi: contractAbi, name: functionName }).inputs.map(
+          (input: any) => input.name,
+        );
+        tx.functionArgTypes = getAbiItem({ abi: contractAbi, name: functionName }).inputs.map(
+          (input: any) => input.type,
+        );
+
         break;
-      } catch {
-        // do nothing
+      } catch (e) {
+        console.error(`Parsing failed: ${e}`);
       }
-    }
-    if (!foundInterface) {
-      tx.functionName = "⚠️ Unknown";
     }
   }
   return tx;

@@ -1,5 +1,4 @@
 {
-  "plugins": ["prettier-plugin-solidity"],
   "arrowParens": "avoid",
   "printWidth": 120,
   "tabWidth": 2,
@@ -8,10 +7,12 @@
     {
       "files": "*.sol",
       "options": {
-        "printWidth": 120,
+        "printWidth": 80,
         "tabWidth": 4,
+        "useTabs": true,
         "singleQuote": false,
-        "bracketSpacing": true
+        "bracketSpacing": true,
+        "explicitTypes": "always"
       }
     }
   ]

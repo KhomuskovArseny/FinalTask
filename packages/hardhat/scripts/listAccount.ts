@@ -3,26 +3,17 @@ dotenv.config();
 import { ethers, Wallet } from "ethers";
 import QRCode from "qrcode";
 import { config } from "hardhat";
-import password from "@inquirer/password";
 
 async function main() {
-  const encryptedKey = process.env.DEPLOYER_PRIVATE_KEY_ENCRYPTED;
+  const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
 
-  if (!encryptedKey) {
-    console.log("🚫️ You don't have a deployer account. Run `yarn generate` or `yarn account:import` first");
+  if (!privateKey) {
+    console.log("🚫️ You don't have a deployer account. Run `yarn generate` first");
     return;
   }
 
-  const pass = await password({ message: "Enter your password to decrypt the private key:" });
-  let wallet: Wallet;
-  try {
-    wallet = (await Wallet.fromEncryptedJson(encryptedKey, pass)) as Wallet;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  } catch (e) {
-    console.log("❌ Failed to decrypt private key. Wrong password?");
-    return;
-  }
-
+  // Get account from private key.
+  const wallet = new Wallet(privateKey);
   const address = wallet.address;
   console.log(await QRCode.toString(address, { type: "terminal", small: true }));
   console.log("Public address:", address, "\n");
@@ -33,13 +24,11 @@ async function main() {
     try {
       const network = availableNetworks[networkName];
       if (!("url" in network)) continue;
-      const provider = new ethers.JsonRpcProvider(network.url);
-      await provider._detectNetwork();
+      const provider = new ethers.providers.JsonRpcProvider(network.url);
       const balance = await provider.getBalance(address);
       console.log("--", networkName, "-- 📡");
-      console.log("   balance:", +ethers.formatEther(balance));
+      console.log("   balance:", +ethers.utils.formatEther(balance));
       console.log("   nonce:", +(await provider.getTransactionCount(address)));
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (e) {
       console.log("Can't connect to network", networkName);
     }
